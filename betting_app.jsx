@@ -3,8 +3,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const STARTING_BALANCE = 1000;
 const ACCENT = "#0047FF";
 
-const SUPABASE_URL = "https://gbgiucoomnnidddtykmt.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdiZ2l1Y29vbW5uaWRkZHR5a210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0MjE0MjYsImV4cCI6MjA5ODk5NzQyNn0.sFCjZV-I-PREhmRlh0Cd673_iAaF0eTM7Z09iH0i9NU";
+const runtimeEnv = (typeof import !== "undefined" && typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
+const SUPABASE_URL = runtimeEnv.VITE_SUPABASE_URL || "https://gbgiucoomnnidddtykmt.supabase.co";
+const SUPABASE_ANON_KEY = runtimeEnv.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdiZ2l1Y29vbW5uaWRkZHR5a210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0MjE0MjYsImV4cCI6MjA5ODk5NzQyNn0.sFCjZV-I-PREhmRlh0Cd673_iAaF0eTM7Z09iH0i9NU";
 
 // ── Supabase fetch helpers ────────────────────────────────────────────────────
 
@@ -286,6 +287,17 @@ function WinnerModal({ onClose }) {
   );
 }
 
+async function ensureProfile(userId, username, token) {
+  try {
+    const existing = await getProfile(userId, token);
+    if (existing) return existing;
+    return await createProfile(userId, username, token);
+  } catch (e) {
+    console.warn("Profile creation failed, continuing without remote profile:", e);
+    return { id: userId, username, balance: STARTING_BALANCE, wins: 0, losses: 0 };
+  }
+}
+
 // ── Auth screen ────────────────────────────────────────────────────────────────
 
 function AuthScreen({ dark, onToggleDark, onAuth }) {
@@ -317,24 +329,16 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
         // After signup user needs to sign in to get a token
         if (res?.user?.id) {
           const loginRes = await signIn(email, password);
-          // Create profile
-          await createProfile(res.user.id, username.trim(), loginRes.access_token);
-          onAuth({ token: loginRes.access_token, userId: res.user.id, username: username.trim() });
+          const profile = await ensureProfile(res.user.id, username.trim(), loginRes.access_token);
+          onAuth({ token: loginRes.access_token, userId: res.user.id, username: profile.username });
         } else {
           setError("Signup succeeded — check your email to confirm, then log in.");
           setMode("login");
         }
       } else {
         const res = await signIn(email, password);
-        const profile = await getProfile(res.user.id, res.access_token);
-        if (!profile) {
-          // Profile missing, create it using metadata username
-          const uname = res.user.user_metadata?.username || email.split("@")[0];
-          await createProfile(res.user.id, uname, res.access_token);
-          onAuth({ token: res.access_token, userId: res.user.id, username: uname });
-        } else {
-          onAuth({ token: res.access_token, userId: res.user.id, username: profile.username });
-        }
+        const profile = await ensureProfile(res.user.id, res.user.user_metadata?.username || email.split("@")[0], res.access_token);
+        onAuth({ token: res.access_token, userId: res.user.id, username: profile.username });
       }
     } catch (e) {
       setError(e.message);

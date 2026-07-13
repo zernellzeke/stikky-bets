@@ -438,11 +438,11 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
   const isOpponent = bet.opponent_id === currentUserId;
-  const canJoin   = bet.status === "open" && !isCreator && !isOpponent;
+  const canJoin   = bet.status === "open" && !isCreator && !bet.opponent_id;
   const canSettle = isCreator && bet.status === "matched";
   const canCancel = bet.status === "open" && isCreator;
-  const hasPlaced = bet.status === "matched" && isOpponent;
-  const hasJoined = bet.status === "matched" && bet.opponent_id;
+  const hasPlaced = !!bet.opponent_id && isOpponent;
+  const hasJoined = !!bet.opponent_id;
   const pot       = bet.stake * 2;
   const oppCost   = bet.stake;
   const optionA   = bet.option_a || "Yes";
@@ -680,6 +680,13 @@ export default function App() {
         opponent_choice: opponentChoice,
       }, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - cost }, session.token);
+      setBets(current => current.map(b => b.id === bet.id ? {
+        ...b,
+        status: "matched",
+        opponent_id: session.userId,
+        opponent_name: session.username,
+        opponent_choice: opponentChoice,
+      } : b));
       showToast(`Bet matched. SV${cost} locked in.`);
       await loadData(session.token, session.userId);
     } catch (e) {

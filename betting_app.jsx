@@ -436,8 +436,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const canJoin   = bet.status === "open" && !isCreator;
   const canSettle = bet.status === "matched" && isCreator;
   const canCancel = bet.status === "open" && isCreator;
-  const pot       = bet.stake + Math.round(bet.stake * bet.odds);
-  const oppCost   = Math.round(bet.stake * bet.odds);
+  const pot       = bet.stake * 2;
+  const oppCost   = bet.stake;
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";
@@ -471,7 +471,6 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
           <span style={{ fontFamily: mono, fontSize: 13, color: ACCENT, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={13} />{bet.stake}</span>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>odds <span style={{ fontFamily: mono, fontSize: 12, color: t.textMid }}>{bet.odds}:1</span></span>
           <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>pot <span style={{ fontFamily: mono, fontSize: 12, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={12} />{pot}</span></span>
         </div>
       </div>
@@ -559,7 +558,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Create form
-  const [form, setForm] = useState({ description: "", stake: 100, odds: 2, secret: false, optionA: "Yes", optionB: "No" });
+  const [form, setForm] = useState({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No" });
 
   const t = theme(dark);
 
@@ -624,18 +623,16 @@ export default function App() {
 
   async function handleCreateBet() {
     const stake = parseInt(form.stake);
-    const odds  = parseFloat(form.odds);
     if (!form.description.trim())           return showToast("Write what the bet is about");
     if (stake < 10)                         return showToast("Minimum stake is SV10");
     if ((myProfile?.balance || 0) < stake)  return showToast("Not enough SV coins");
-    if (odds < 1 || odds > 20)             return showToast("Odds must be 1–20");
 
     try {
       const newBet = {
         creator_id: session.userId,
         creator_name: session.username,
         description: form.description.trim(),
-        stake, odds,
+        stake,
         status: "open",
         secret: form.secret,
         option_a: (form.optionA || "Yes").trim(),
@@ -643,7 +640,7 @@ export default function App() {
       };
       await createBet(newBet, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - stake }, session.token);
-      setForm({ description: "", stake: 100, odds: 2, secret: false, optionA: "Yes", optionB: "No" });
+      setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No" });
       setView("bets");
       showToast(`Bet live — staked SV${stake}`);
       await loadData(session.token, session.userId);
@@ -653,7 +650,7 @@ export default function App() {
   }
 
   async function handleJoinBet(bet) {
-    const cost = Math.round(bet.stake * bet.odds);
+    const cost = bet.stake;
     if ((myProfile?.balance || 0) < cost) return showToast(`Need SV${cost} to join`);
     try {
       await updateBet(bet.id, { status: "matched", opponent_id: session.userId, opponent_name: session.username }, session.token);
@@ -666,7 +663,7 @@ export default function App() {
   }
 
   async function handleSettleBet(bet, winnerId, winnerName, winnerOption) {
-    const pot = bet.stake + Math.round(bet.stake * bet.odds);
+    const pot = bet.stake * 2;
     const loserId   = winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id;
     const winnerProf = profiles.find(p => p.id === winnerId);
     const loserProf  = profiles.find(p => p.id === loserId);
@@ -837,9 +834,8 @@ export default function App() {
                   onChange={e => setForm(f => ({ ...f, stake: e.target.value }))} style={inputStyle} />
               </div>
               <div>
-                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>ODDS (X : 1)</label>
-                <input type="number" min={1} max={20} step={0.5} value={form.odds}
-                  onChange={e => setForm(f => ({ ...f, odds: e.target.value }))} style={inputStyle} />
+                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>MATCH AMOUNT</label>
+                <div style={{ ...inputStyle, display: "flex", alignItems: "center", minHeight: 44 }}>{parseInt(form.stake) || 0}</div>
               </div>
             </div>
 
@@ -875,8 +871,8 @@ export default function App() {
             <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 4, padding: "12px 14px", marginBottom: "1.5rem", display: "flex", gap: 24, flexWrap: "wrap" }}>
               {[
                 { label: "YOU RISK",  val: parseInt(form.stake) || 0,  color: ACCENT },
-                { label: "THEY RISK", val: Math.round((parseInt(form.stake)||0) * (parseFloat(form.odds)||1)), color: t.textMid },
-                { label: "TOTAL POT", val: (parseInt(form.stake)||0) + Math.round((parseInt(form.stake)||0) * (parseFloat(form.odds)||1)), color: t.text },
+                { label: "THEY RISK", val: parseInt(form.stake) || 0,  color: t.textMid },
+                { label: "TOTAL POT", val: (parseInt(form.stake)||0) * 2, color: t.text },
               ].map(({ label, val, color }) => (
                 <div key={label}>
                   <div style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", marginBottom: 4 }}>{label}</div>

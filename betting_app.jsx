@@ -442,11 +442,12 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const canSettle = isCreator && bet.status === "matched";
   const canCancel = bet.status === "open" && isCreator;
   const hasPlaced = bet.status === "matched" && isOpponent;
+  const hasJoined = bet.status === "matched" && bet.opponent_id;
   const pot       = bet.stake * 2;
   const oppCost   = bet.stake;
   const optionA   = bet.option_a || "Yes";
   const optionB   = bet.option_b || "No";
-  const opponentChoice = bet.opponent_choice ? (bet.opponent_choice === "B" ? optionB : optionA) : null;
+  const opponentChoice = bet.opponent_choice === "B" ? optionB : bet.opponent_choice === "A" ? optionA : null;
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";
@@ -522,10 +523,15 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
           </>)}
           {hasPlaced && (
             <button disabled style={{
-              fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.border2,
-              color: t.textDim, border: `1px solid ${t.border2}`, padding: "7px 14px", borderRadius: 4,
+              fontFamily: sans, fontSize: 12, fontWeight: 600,
+              background: bet.opponent_choice ? ACCENT : t.btnSecBg,
+              color: bet.opponent_choice ? "#fff" : t.textDim,
+              border: `1px solid ${bet.opponent_choice ? ACCENT : t.border2}`,
+              padding: "7px 14px", borderRadius: 4,
               cursor: "not-allowed"
-            }}>Bet placed</button>
+            }}>
+              Bet placed — {opponentChoice || "Waiting..."}
+            </button>
           )}
           {canSettle && (<>
             <button onClick={() => onSettle(bet, optionA)} style={{

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const STARTING_BALANCE = 1000;
 const ACCENT = "#0047FF";
 
-const runtimeEnv = (typeof import !== "undefined" && typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
+const runtimeEnv = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
 const SUPABASE_URL = runtimeEnv.VITE_SUPABASE_URL || "https://gbgiucoomnnidddtykmt.supabase.co";
 const SUPABASE_ANON_KEY = runtimeEnv.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdiZ2l1Y29vbW5uaWRkZHR5a210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0MjE0MjYsImV4cCI6MjA5ODk5NzQyNn0.sFCjZV-I-PREhmRlh0Cd673_iAaF0eTM7Z09iH0i9NU";
 

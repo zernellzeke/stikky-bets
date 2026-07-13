@@ -59,12 +59,18 @@ async function getProfile(userId, token) {
 }
 
 async function createProfile(userId, username, token) {
-  return sbFetch("/rest/v1/profiles", {
+  const created = await sbFetch("/rest/v1/profiles", {
     method: "POST",
     token,
     prefer: "return=representation",
     body: { id: userId, username, balance: STARTING_BALANCE, wins: 0, losses: 0 },
   });
+
+  if (Array.isArray(created)) {
+    return created[0] || { id: userId, username, balance: STARTING_BALANCE, wins: 0, losses: 0 };
+  }
+
+  return created || { id: userId, username, balance: STARTING_BALANCE, wins: 0, losses: 0 };
 }
 
 async function updateProfile(userId, updates, token) {
@@ -330,7 +336,8 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
         if (res?.user?.id) {
           const loginRes = await signIn(email, password);
           const profile = await ensureProfile(res.user.id, username.trim(), loginRes.access_token);
-          onAuth({ token: loginRes.access_token, userId: res.user.id, username: profile.username });
+          const chosenUsername = profile?.username || username.trim();
+          onAuth({ token: loginRes.access_token, userId: res.user.id, username: chosenUsername });
         } else {
           setError("Signup succeeded — check your email to confirm, then log in.");
           setMode("login");
@@ -338,7 +345,8 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
       } else {
         const res = await signIn(email, password);
         const profile = await ensureProfile(res.user.id, res.user.user_metadata?.username || email.split("@")[0], res.access_token);
-        onAuth({ token: res.access_token, userId: res.user.id, username: profile.username });
+        const chosenUsername = profile?.username || res.user.user_metadata?.username || email.split("@")[0];
+        onAuth({ token: res.access_token, userId: res.user.id, username: chosenUsername });
       }
     } catch (e) {
       setError(e.message);
@@ -347,14 +355,14 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem 1.25rem" }}>
+    <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem 1.25rem", backgroundImage: dark ? "radial-gradient(circle at top left, rgba(0,71,255,0.18), transparent 35%), linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "radial-gradient(circle at top left, rgba(0,71,255,0.08), transparent 35%), linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" />
 
       <div style={{ position: "absolute", top: 24, right: 24 }}>
         <ModeToggle dark={dark} onToggle={onToggleDark} />
       </div>
 
-      <div style={{ width: "100%", maxWidth: 380 }}>
+      <div style={{ width: "100%", maxWidth: 420, background: dark ? "rgba(20,20,20,0.82)" : "rgba(255,255,255,0.86)", backdropFilter: "blur(18px)", border: `1px solid ${t.border}`, borderRadius: 20, boxShadow: dark ? "0 24px 80px rgba(0,0,0,0.35)" : "0 24px 80px rgba(15,23,42,0.12)", padding: "28px 24px" }}>
         <div style={{ marginBottom: 32, textAlign: "center" }}>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
             <Logo textColor={t.text} />
@@ -364,7 +372,7 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
           </p>
         </div>
 
-        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: "28px 24px" }}>
+        <div style={{ background: "transparent", border: "none", padding: 0 }}>
           <div style={{ display: "flex", gap: 0, marginBottom: 24, borderBottom: `1px solid ${t.border}` }}>
             {["login", "signup"].map(m => (
               <button key={m} onClick={() => { setMode(m); setError(""); }} style={{
@@ -478,9 +486,12 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
       )}
 
       {bet.winner_name && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontFamily: mono, fontSize: 11, color: ACCENT, letterSpacing: "0.08em", fontWeight: 700 }}>WINNER</span>
           <span style={{ fontFamily: sans, fontSize: 13, color: t.text, fontWeight: 600 }}>{bet.winner_name}</span>
+          {bet.winner_option && (
+            <span style={{ fontFamily: mono, fontSize: 11, color: t.textDim }}>({bet.winner_option})</span>
+          )}
           <span style={{ fontFamily: mono, fontSize: 13, color: ACCENT, display: "inline-flex", alignItems: "center", gap: 2 }}>+<Coin size={13} />{pot}</span>
         </div>
       )}
@@ -494,16 +505,28 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             }}>Take bet — put up <Coin size={11} />{oppCost}</button>
           )}
           {canSettle && (<>
-            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name)} style={{
+            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, bet.option_a)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{bet.creator_name} won</button>
-            <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name)} style={{
+            }}>{bet.creator_name} — {bet.option_a}</button>
+            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, bet.option_b)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{bet.opponent_name} won</button>
+            }}>{bet.creator_name} — {bet.option_b}</button>
+            {bet.opponent_name && (<>
+              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, bet.option_a)} style={{
+                fontFamily: sans, fontSize: 12, fontWeight: 600,
+                background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
+                padding: "7px 14px", borderRadius: 4, cursor: "pointer"
+              }}>{bet.opponent_name} — {bet.option_a}</button>
+              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, bet.option_b)} style={{
+                fontFamily: sans, fontSize: 12, fontWeight: 600,
+                background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
+                padding: "7px 14px", borderRadius: 4, cursor: "pointer"
+              }}>{bet.opponent_name} — {bet.option_b}</button>
+            </>)}
           </>)}
           {canCancel && (
             <button onClick={() => onCancel(bet)} style={{
@@ -536,7 +559,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Create form
-  const [form, setForm] = useState({ description: "", stake: 100, odds: 2, secret: false });
+  const [form, setForm] = useState({ description: "", stake: 100, odds: 2, secret: false, optionA: "Yes", optionB: "No" });
 
   const t = theme(dark);
 
@@ -615,10 +638,12 @@ export default function App() {
         stake, odds,
         status: "open",
         secret: form.secret,
+        option_a: (form.optionA || "Yes").trim(),
+        option_b: (form.optionB || "No").trim(),
       };
       await createBet(newBet, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - stake }, session.token);
-      setForm({ description: "", stake: 100, odds: 2, secret: false });
+      setForm({ description: "", stake: 100, odds: 2, secret: false, optionA: "Yes", optionB: "No" });
       setView("bets");
       showToast(`Bet live — staked SV${stake}`);
       await loadData(session.token, session.userId);
@@ -640,14 +665,19 @@ export default function App() {
     }
   }
 
-  async function handleSettleBet(bet, winnerId, winnerName) {
+  async function handleSettleBet(bet, winnerId, winnerName, winnerOption) {
     const pot = bet.stake + Math.round(bet.stake * bet.odds);
     const loserId   = winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id;
     const winnerProf = profiles.find(p => p.id === winnerId);
     const loserProf  = profiles.find(p => p.id === loserId);
     if (!winnerProf || !loserProf) return showToast("Profile not found");
     try {
-      await updateBet(bet.id, { status: "settled", winner_id: winnerId, winner_name: winnerName }, session.token);
+      await updateBet(bet.id, {
+        status: "settled",
+        winner_id: winnerId,
+        winner_name: winnerName,
+        winner_option: winnerOption || null,
+      }, session.token);
       await updateProfile(winnerId, { balance: winnerProf.balance + pot, wins: winnerProf.wins + 1 }, session.token);
       await updateProfile(loserId, { losses: loserProf.losses + 1 }, session.token);
       showToast(`${winnerName} collects SV${pot}`);
@@ -708,7 +738,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, transition: "background 0.2s" }}>
+    <div style={{ minHeight: "100vh", background: t.bg, transition: "background 0.2s", backgroundImage: dark ? "radial-gradient(circle at top left, rgba(0,71,255,0.18), transparent 32%), linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "radial-gradient(circle at top left, rgba(0,71,255,0.08), transparent 32%), linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" />
 
       {winnerModal && <WinnerModal onClose={() => setWinnerModal(false)} />}
@@ -722,7 +752,7 @@ export default function App() {
         }}>{toast}</div>
       )}
 
-      <div style={{ maxWidth: 620, margin: "0 auto", padding: "2rem 1.25rem" }}>
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "2rem 1.25rem" }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "2rem" }}>
@@ -810,6 +840,17 @@ export default function App() {
                 <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>ODDS (X : 1)</label>
                 <input type="number" min={1} max={20} step={0.5} value={form.odds}
                   onChange={e => setForm(f => ({ ...f, odds: e.target.value }))} style={inputStyle} />
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: "1.25rem" }}>
+              <div>
+                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>OPTION A</label>
+                <input value={form.optionA} onChange={e => setForm(f => ({ ...f, optionA: e.target.value }))} placeholder="Yes" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>OPTION B</label>
+                <input value={form.optionB} onChange={e => setForm(f => ({ ...f, optionB: e.target.value }))} placeholder="No" style={inputStyle} />
               </div>
             </div>
 

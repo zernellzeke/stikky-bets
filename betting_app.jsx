@@ -438,9 +438,11 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
 function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCancel, dark }) {
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
+  const isOpponent = bet.opponent_id === currentUserId;
   const canJoin   = bet.status === "open" && !isCreator;
   const canSettle = isCreator && (bet.status === "matched" || bet.status === "open");
   const canCancel = bet.status === "open" && isCreator;
+  const hasPlaced = bet.status === "matched" && isOpponent;
   const pot       = bet.stake * 2;
   const oppCost   = bet.stake;
   const optionA   = bet.option_a || "Yes";
@@ -477,7 +479,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
           <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>puts</span>
           <span style={{ fontFamily: mono, fontSize: 13, color: ACCENT, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={13} />{bet.stake}</span>
         </div>
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>creator backs <strong>{bet.creator_choice === "B" ? optionB : optionA}</strong></span>
           <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>pot <span style={{ fontFamily: mono, fontSize: 12, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={12} />{pot}</span></span>
         </div>
       </div>
@@ -502,7 +505,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
         </div>
       )}
 
-      {(canJoin || canSettle || canCancel) && (
+      {(canJoin || canSettle || canCancel || hasPlaced) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
           {canJoin && (
             <button onClick={() => onJoin(bet)} style={{
@@ -510,29 +513,24 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
               color: "#fff", border: "none", padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>Take bet — put up <Coin size={11} />{oppCost}</button>
           )}
+          {hasPlaced && (
+            <button disabled style={{
+              fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.border2,
+              color: t.textDim, border: `1px solid ${t.border2}`, padding: "7px 14px", borderRadius: 4,
+              cursor: "not-allowed"
+            }}>Bet placed</button>
+          )}
           {canSettle && (<>
-            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, optionA)} style={{
+            <button onClick={() => onSettle(bet, optionA)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>{optionA}</button>
-            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, optionB)} style={{
+            <button onClick={() => onSettle(bet, optionB)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>{optionB}</button>
-            {bet.opponent_name && (<>
-              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionA)} style={{
-                fontFamily: sans, fontSize: 12, fontWeight: 600,
-                background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
-                padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-              }}>{optionA}</button>
-              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionB)} style={{
-                fontFamily: sans, fontSize: 12, fontWeight: 600,
-                background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
-                padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-              }}>{bet.opponent_name} — {bet.option_b}</button>
-            </>)}
           </>)}
           {canCancel && (
             <button onClick={() => onCancel(bet)} style={{
@@ -565,7 +563,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Create form
-  const [form, setForm] = useState({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No" });
+  const [form, setForm] = useState({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A" });
 
   const t = theme(dark);
 
@@ -645,10 +643,11 @@ export default function App() {
         secret: form.secret,
         option_a: (form.optionA || "Yes").trim(),
         option_b: (form.optionB || "No").trim(),
+        creator_choice: form.creatorChoice,
       };
       await createBet(newBet, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - stake }, session.token);
-      setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No" });
+      setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A" });
       setView("bets");
       showToast(`Bet live — staked SV${stake}`);
       await loadData(session.token, session.userId);
@@ -670,19 +669,28 @@ export default function App() {
     }
   }
 
-  async function handleSettleBet(bet, winnerId, winnerName, winnerOption) {
+  async function handleSettleBet(bet, selectedOption) {
+    const optionA = bet.option_a || "Yes";
+    const optionB = bet.option_b || "No";
+    const creatorChoice = bet.creator_choice || "A";
+    const creatorSide = creatorChoice === "B" ? optionB : optionA;
     const opponentExists = !!bet.opponent_id;
     const pot = opponentExists ? bet.stake * 2 : bet.stake;
-    const loserId = winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id;
+    const winnerId = opponentExists
+      ? (selectedOption === creatorSide ? bet.creator_id : bet.opponent_id)
+      : bet.creator_id;
+    const loserId = opponentExists ? (winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id) : null;
+    const winnerName = opponentExists ? (winnerId === bet.creator_id ? bet.creator_name : bet.opponent_name) : bet.creator_name;
     const winnerProf = profiles.find(p => p.id === winnerId);
     const loserProf = opponentExists ? profiles.find(p => p.id === loserId) : null;
     if (!winnerProf) return showToast("Profile not found");
+
     try {
       await updateBet(bet.id, {
         status: "settled",
         winner_id: winnerId,
         winner_name: winnerName,
-        winner_option: winnerOption || null,
+        winner_option: selectedOption || null,
       }, session.token);
 
       if (opponentExists) {
@@ -691,7 +699,6 @@ export default function App() {
         await updateProfile(loserId, { losses: loserProf.losses + 1 }, session.token);
         showToast(`${winnerName} collects SV${pot}`);
       } else {
-        // No opponent: refund the creator's stake (safe default)
         await updateProfile(winnerId, { balance: winnerProf.balance + bet.stake }, session.token);
         showToast(`No opponent — stake returned to ${winnerName}`);
       }
@@ -866,6 +873,25 @@ export default function App() {
                 <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>OPTION B</label>
                 <input value={form.optionB} onChange={e => setForm(f => ({ ...f, optionB: e.target.value }))} placeholder="No" style={inputStyle} />
               </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: "1.25rem" }}>
+              {[
+                { value: "A", label: form.optionA || "Yes" },
+                { value: "B", label: form.optionB || "No" },
+              ].map(choice => (
+                <button key={choice.value} type="button" onClick={() => setForm(f => ({ ...f, creatorChoice: choice.value }))}
+                  style={{
+                    width: "100%", textAlign: "center", padding: "12px 14px",
+                    fontFamily: sans, fontSize: 12, fontWeight: 600,
+                    borderRadius: 4, border: `1px solid ${form.creatorChoice === choice.value ? ACCENT : t.border2}`,
+                    background: form.creatorChoice === choice.value ? ACCENT : t.btnSecBg,
+                    color: form.creatorChoice === choice.value ? "#fff" : t.text,
+                    cursor: "pointer"
+                  }}>
+                  {choice.value === "A" ? "Creator backs" : "Creator backs"} {choice.label}
+                </button>
+              ))}
             </div>
 
             <button onClick={() => setForm(f => ({ ...f, secret: !f.secret }))} style={{

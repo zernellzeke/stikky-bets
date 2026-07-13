@@ -445,8 +445,6 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const oppCost   = bet.stake;
   const optionA   = bet.option_a || "Yes";
   const optionB   = bet.option_b || "No";
-  const optionA   = bet.option_a || "Yes";
-  const optionB   = bet.option_b || "No";
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";

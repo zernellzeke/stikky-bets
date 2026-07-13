@@ -438,8 +438,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
   const isOpponent = bet.opponent_id === currentUserId;
-  const canJoin   = bet.status === "open" && !isCreator;
-  const canSettle = isCreator && (bet.status === "matched" || bet.status === "open");
+  const canJoin   = bet.status === "open" && !isCreator && !isOpponent;
+  const canSettle = isCreator && bet.status === "matched";
   const canCancel = bet.status === "open" && isCreator;
   const hasPlaced = bet.status === "matched" && isOpponent;
   const pot       = bet.stake * 2;
@@ -867,7 +867,7 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: "1.25rem" }}>
               <div>
                 <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>YOUR STAKE</label>
-                <input type="number" min={10} max={myProfile?.balance || 1000} step={10} value={form.stake}
+                <input type="number" min={10} value={form.stake}
                   onChange={e => setForm(f => ({ ...f, stake: e.target.value }))} style={inputStyle} />
               </div>
               <div>

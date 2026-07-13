@@ -542,6 +542,14 @@ export default function App() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3200); }
 
+  function persistSession(sess) {
+    if (!sess) {
+      localStorage.removeItem("stikky-session");
+      return;
+    }
+    localStorage.setItem("stikky-session", JSON.stringify(sess));
+  }
+
   // Load data after auth
   const loadData = useCallback(async (token, userId) => {
     setLoading(true);
@@ -560,13 +568,31 @@ export default function App() {
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("stikky-session");
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.token && saved?.userId && saved?.username) {
+        setSession(saved);
+        loadData(saved.token, saved.userId);
+      } else {
+        persistSession(null);
+      }
+    } catch {
+      persistSession(null);
+    }
+  }, [loadData]);
+
   function handleAuth(sess) {
     setSession(sess);
+    persistSession(sess);
     loadData(sess.token, sess.userId);
   }
 
   async function handleSignOut() {
     if (session) await signOut(session.token).catch(() => {});
+    persistSession(null);
     setSession(null);
     setBets([]);
     setProfiles([]);
@@ -771,7 +797,7 @@ export default function App() {
           <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: "1.25rem" }}>
             <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>THE BET</label>
             <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="e.g. Finn won't finish his pint before midnight"
+              placeholder="e.g. Vikky will be naked when kidnapped"
               rows={3} style={{ ...inputStyle, fontSize: 14, fontFamily: sans, fontWeight: 500, letterSpacing: "-0.02em", resize: "vertical", marginBottom: "1.25rem" }} />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: "1.25rem" }}>

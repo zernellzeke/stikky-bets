@@ -515,18 +515,18 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{bet.creator_name} — {bet.option_a}</button>
+            }}>{optionA}</button>
             <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, optionB)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{bet.creator_name} — {bet.option_b}</button>
+            }}>{optionB}</button>
             {bet.opponent_name && (<>
               <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionA)} style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
                 background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
                 padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-              }}>{bet.opponent_name} — {bet.option_a}</button>
+              }}>{optionA}</button>
               <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionB)} style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
                 background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,

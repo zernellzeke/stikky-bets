@@ -439,10 +439,12 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
   const canJoin   = bet.status === "open" && !isCreator;
-  const canSettle = bet.status === "matched" && isCreator;
+  const canSettle = isCreator && (bet.status === "matched" || bet.status === "open");
   const canCancel = bet.status === "open" && isCreator;
   const pot       = bet.stake * 2;
   const oppCost   = bet.stake;
+  const optionA   = bet.option_a || "Yes";
+  const optionB   = bet.option_b || "No";
   const optionA   = bet.option_a || "Yes";
   const optionB   = bet.option_b || "No";
 
@@ -640,6 +642,7 @@ export default function App() {
         creator_name: session.username,
         description: form.description.trim(),
         stake,
+        odds: 1,
         status: "open",
         secret: form.secret,
         option_a: (form.optionA || "Yes").trim(),
@@ -670,11 +673,12 @@ export default function App() {
   }
 
   async function handleSettleBet(bet, winnerId, winnerName, winnerOption) {
-    const pot = bet.stake * 2;
-    const loserId   = winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id;
+    const opponentExists = !!bet.opponent_id;
+    const pot = opponentExists ? bet.stake * 2 : bet.stake;
+    const loserId = winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id;
     const winnerProf = profiles.find(p => p.id === winnerId);
-    const loserProf  = profiles.find(p => p.id === loserId);
-    if (!winnerProf || !loserProf) return showToast("Profile not found");
+    const loserProf = opponentExists ? profiles.find(p => p.id === loserId) : null;
+    if (!winnerProf) return showToast("Profile not found");
     try {
       await updateBet(bet.id, {
         status: "settled",
@@ -682,9 +686,18 @@ export default function App() {
         winner_name: winnerName,
         winner_option: winnerOption || null,
       }, session.token);
-      await updateProfile(winnerId, { balance: winnerProf.balance + pot, wins: winnerProf.wins + 1 }, session.token);
-      await updateProfile(loserId, { losses: loserProf.losses + 1 }, session.token);
-      showToast(`${winnerName} collects SV${pot}`);
+
+      if (opponentExists) {
+        if (!loserProf) return showToast("Opponent profile not found");
+        await updateProfile(winnerId, { balance: winnerProf.balance + pot, wins: winnerProf.wins + 1 }, session.token);
+        await updateProfile(loserId, { losses: loserProf.losses + 1 }, session.token);
+        showToast(`${winnerName} collects SV${pot}`);
+      } else {
+        // No opponent: refund the creator's stake (safe default)
+        await updateProfile(winnerId, { balance: winnerProf.balance + bet.stake }, session.token);
+        showToast(`No opponent — stake returned to ${winnerName}`);
+      }
+
       if (winnerId === session.userId) setWinnerModal(true);
       await loadData(session.token, session.userId);
     } catch (e) {

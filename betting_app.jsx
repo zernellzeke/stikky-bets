@@ -87,8 +87,7 @@ async function getAllProfiles(token) {
 }
 
 function stripUnsupportedBetFields(payload) {
-  const unsupported = new Set(["option_a", "option_b", "secret", "winner_option"]);
-  return Object.fromEntries(Object.entries(payload || {}).filter(([key]) => !unsupported.has(key)));
+  return payload;
 }
 
 // Bets
@@ -447,6 +446,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const oppCost   = bet.stake;
   const optionA   = bet.option_a || "Yes";
   const optionB   = bet.option_b || "No";
+  const opponentChoice = bet.opponent_choice ? (bet.opponent_choice === "B" ? optionB : optionA) : null;
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";
@@ -486,11 +486,14 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
       </div>
 
       {bet.opponent_name && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <Avatar name={bet.opponent_name} size={22} dark={dark} />
           <span style={{ fontFamily: sans, fontSize: 12, color: t.textMid }}>{bet.opponent_name}</span>
           <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>counters with</span>
           <span style={{ fontFamily: mono, fontSize: 13, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={13} />{oppCost}</span>
+          {opponentChoice && (
+            <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>({opponentChoice})</span>
+          )}
         </div>
       )}
 
@@ -507,12 +510,16 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
 
       {(canJoin || canSettle || canCancel || hasPlaced) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
-          {canJoin && (
-            <button onClick={() => onJoin(bet)} style={{
+          {canJoin && (<>
+            <button onClick={() => onJoin(bet, "A")} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600, background: ACCENT,
               color: "#fff", border: "none", padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>Take bet — put up <Coin size={11} />{oppCost}</button>
-          )}
+            }}>{optionA}</button>
+            <button onClick={() => onJoin(bet, "B")} style={{
+              fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.btnSecBg,
+              color: t.text, border: `1px solid ${t.border2}`, padding: "7px 14px", borderRadius: 4, cursor: "pointer"
+            }}>{optionB}</button>
+          </>)}
           {hasPlaced && (
             <button disabled style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.border2,
@@ -656,11 +663,16 @@ export default function App() {
     }
   }
 
-  async function handleJoinBet(bet) {
+  async function handleJoinBet(bet, opponentChoice) {
     const cost = bet.stake;
     if ((myProfile?.balance || 0) < cost) return showToast(`Need SV${cost} to join`);
     try {
-      await updateBet(bet.id, { status: "matched", opponent_id: session.userId, opponent_name: session.username }, session.token);
+      await updateBet(bet.id, {
+        status: "matched",
+        opponent_id: session.userId,
+        opponent_name: session.username,
+        opponent_choice: opponentChoice,
+      }, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - cost }, session.token);
       showToast(`Bet matched. SV${cost} locked in.`);
       await loadData(session.token, session.userId);

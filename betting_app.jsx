@@ -86,6 +86,11 @@ async function getAllProfiles(token) {
   return sbFetch("/rest/v1/profiles?select=*&order=balance.desc", { token });
 }
 
+function stripUnsupportedBetFields(payload) {
+  const unsupported = new Set(["option_a", "option_b", "secret", "winner_option"]);
+  return Object.fromEntries(Object.entries(payload || {}).filter(([key]) => !unsupported.has(key)));
+}
+
 // Bets
 async function getBets(token) {
   return sbFetch("/rest/v1/bets?select=*&order=created_at.desc", { token });
@@ -96,7 +101,7 @@ async function createBet(bet, token) {
     method: "POST",
     token,
     prefer: "return=representation",
-    body: bet,
+    body: stripUnsupportedBetFields(bet),
   });
 }
 
@@ -105,7 +110,7 @@ async function updateBet(betId, updates, token) {
     method: "PATCH",
     token,
     prefer: "return=representation",
-    body: updates,
+    body: stripUnsupportedBetFields(updates),
   });
 }
 
@@ -438,6 +443,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const canCancel = bet.status === "open" && isCreator;
   const pot       = bet.stake * 2;
   const oppCost   = bet.stake;
+  const optionA   = bet.option_a || "Yes";
+  const optionB   = bet.option_b || "No";
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";
@@ -504,23 +511,23 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             }}>Take bet — put up <Coin size={11} />{oppCost}</button>
           )}
           {canSettle && (<>
-            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, bet.option_a)} style={{
+            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, optionA)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>{bet.creator_name} — {bet.option_a}</button>
-            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, bet.option_b)} style={{
+            <button onClick={() => onSettle(bet, bet.creator_id, bet.creator_name, optionB)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
               background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>{bet.creator_name} — {bet.option_b}</button>
             {bet.opponent_name && (<>
-              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, bet.option_a)} style={{
+              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionA)} style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
                 background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
                 padding: "7px 14px", borderRadius: 4, cursor: "pointer"
               }}>{bet.opponent_name} — {bet.option_a}</button>
-              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, bet.option_b)} style={{
+              <button onClick={() => onSettle(bet, bet.opponent_id, bet.opponent_name, optionB)} style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
                 background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
                 padding: "7px 14px", borderRadius: 4, cursor: "pointer"

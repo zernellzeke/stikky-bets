@@ -481,7 +481,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const pillStatus = participants.length > 0 && isOpen ? "matched" : bet.status;
 
   const isSecret     = bet.secret;
-  const descRevealed = !isSecret || isCreator || bet.status === "settled";
+  const isInvited     = (bet.invited_ids || []).includes(currentUserId);
+  const descRevealed = !isSecret || isCreator || bet.status === "settled" || isInvited;
   const justRevealed = isSecret && bet.status === "settled";
 
   const winners = bet.status === "settled" && bet.winner_option
@@ -633,7 +634,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Create form
-  const [form, setForm] = useState({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A" });
+  const [form, setForm] = useState({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A", inviteIds: [] });
 
   const t = theme(dark);
 
@@ -723,10 +724,11 @@ export default function App() {
         option_a: (form.optionA || "Yes").trim(),
         option_b: (form.optionB || "No").trim(),
         creator_choice: form.creatorChoice,
+        invited_ids: form.secret ? form.inviteIds : [],
       };
       await createBet(newBet, session.token);
       await updateProfile(session.userId, { balance: myProfile.balance - stake }, session.token);
-      setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A" });
+      setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A", inviteIds: [] });
       setView("bets");
       showToast(`Bet live — staked SV${stake}`);
       await loadData(session.token, session.userId);
@@ -961,16 +963,10 @@ export default function App() {
               placeholder="e.g. Vikky will be naked when kidnapped"
               rows={3} style={{ ...inputStyle, fontSize: 14, fontFamily: sans, fontWeight: 500, letterSpacing: "-0.02em", resize: "vertical", marginBottom: "1.25rem" }} />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: "1.25rem" }}>
-              <div>
-                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>YOUR STAKE</label>
-                <input type="number" min={10} value={form.stake}
-                  onChange={e => setForm(f => ({ ...f, stake: e.target.value }))} style={inputStyle} />
-              </div>
-              <div>
-                <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>MATCH AMOUNT</label>
-                <div style={{ ...inputStyle, display: "flex", alignItems: "center", minHeight: 44 }}>{parseInt(form.stake) || 0}</div>
-              </div>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <label style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", display: "block", marginBottom: 8 }}>STAKE</label>
+              <input type="number" min={10} value={form.stake}
+                onChange={e => setForm(f => ({ ...f, stake: e.target.value }))} style={inputStyle} />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: "1.25rem" }}>
@@ -998,7 +994,7 @@ export default function App() {
                     color: form.creatorChoice === choice.value ? "#fff" : t.text,
                     cursor: "pointer"
                   }}>
-                  {choice.value === "A" ? "Creator backs" : "Creator backs"} {choice.label}
+                  Back {choice.label}
                 </button>
               ))}
             </div>
@@ -1007,7 +1003,7 @@ export default function App() {
               display: "flex", alignItems: "center", gap: 10,
               background: form.secret ? (dark ? "#0d1a3a" : "#e8eeff") : t.btnSecBg,
               border: `1px solid ${form.secret ? ACCENT : t.border}`,
-              borderRadius: 4, padding: "10px 14px", marginBottom: "1.25rem",
+              borderRadius: 4, padding: "10px 14px", marginBottom: form.secret ? 12 : "1.25rem",
               cursor: "pointer", width: "100%", textAlign: "left"
             }}>
               <span style={{ fontSize: 16 }}>{form.secret ? "🔒" : "🔓"}</span>
@@ -1020,6 +1016,36 @@ export default function App() {
                 </div>
               </div>
             </button>
+
+            {form.secret && (
+              <div style={{ border: `1px solid ${t.border}`, borderRadius: 4, padding: "12px 14px", marginBottom: "1.25rem" }}>
+                <div style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", marginBottom: 8 }}>INVITE — CAN SEE THE DESCRIPTION</div>
+                {profiles.filter(p => p.id !== session.userId).length === 0 ? (
+                  <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>No other players yet</span>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {profiles.filter(p => p.id !== session.userId).map(p => {
+                      const invited = form.inviteIds.includes(p.id);
+                      return (
+                        <button key={p.id} type="button" onClick={() => setForm(f => ({
+                          ...f,
+                          inviteIds: invited ? f.inviteIds.filter(id => id !== p.id) : [...f.inviteIds, p.id],
+                        }))} style={{
+                          display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+                          background: invited ? (dark ? "#0d1a3a" : "#e8eeff") : "transparent",
+                          border: `1px solid ${invited ? ACCENT : t.border2}`, borderRadius: 4,
+                          cursor: "pointer", textAlign: "left"
+                        }}>
+                          <Avatar name={p.username} size={20} dark={dark} />
+                          <span style={{ fontFamily: sans, fontSize: 12, color: t.text }}>{p.username}</span>
+                          {invited && <span style={{ fontFamily: mono, fontSize: 10, color: ACCENT, marginLeft: "auto" }}>INVITED</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 4, padding: "12px 14px", marginBottom: "1.5rem", display: "flex", gap: 24, flexWrap: "wrap" }}>
               {[

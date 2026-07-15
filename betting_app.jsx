@@ -472,7 +472,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             : <p style={{ margin: 0, fontFamily: sans, fontWeight: 600, fontSize: 15, letterSpacing: "-0.03em", lineHeight: 1.35, color: "transparent", background: t.textDim, borderRadius: 3, filter: "blur(6px)", userSelect: "none", pointerEvents: "none" }}>{bet.description.replace(/./g, "█")}</p>
           }
         </div>
-        <Pill status={bet.status} dark={dark} />
+        <Pill status={pillStatus} dark={dark} />
       </div>
 
       <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
@@ -511,7 +511,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
         </div>
       )}
 
-      {(canJoin || canSettle || canCancel || isMatchedAny) && (
+      {(canJoin || canSettle || canCancel || hasMatch) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
           {canJoin && (<>
             <button onClick={() => onJoin(bet, "A")} style={{
@@ -524,7 +524,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             }}>{optionB}</button>
           </>)}
 
-          {isMatchedAny && !canJoin && (
+          {hasMatch && !canJoin && (
             <>
               <button disabled style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,

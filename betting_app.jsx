@@ -515,8 +515,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
           {canJoin && (<>
             <button onClick={() => onJoin(bet, "A")} style={{
-              fontFamily: sans, fontSize: 12, fontWeight: 600, background: ACCENT,
-              color: "#fff", border: "none", padding: "7px 14px", borderRadius: 4, cursor: "pointer"
+              fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.btnSecBg,
+              color: t.text, border: `1px solid ${t.border2}`, padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>{optionA}</button>
             <button onClick={() => onJoin(bet, "B")} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600, background: t.btnSecBg,
@@ -524,7 +524,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             }}>{optionB}</button>
           </>)}
 
-          {hasMatch && !canJoin && (
+          {hasMatch && !canJoin && !canSettle && (
             <>
               <button disabled style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,

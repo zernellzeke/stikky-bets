@@ -684,14 +684,18 @@ export default function App() {
 
   async function handleJoinBet(bet, opponentChoice) {
     const cost = bet.stake;
+    if (bet.opponent_id) return showToast("This bet is already matched");
     if ((myProfile?.balance || 0) < cost) return showToast(`Need SV${cost} to join`);
     try {
-      await updateBet(bet.id, {
+      const result = await updateBet(bet.id, {
         status: "matched",
         opponent_id: session.userId,
         opponent_name: session.username,
         opponent_choice: opponentChoice,
       }, session.token);
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error("Join was blocked by the database (check Supabase RLS update policy on bets)");
+      }
       await updateProfile(session.userId, { balance: myProfile.balance - cost }, session.token);
       setBets(current => current.map(b => b.id === bet.id ? {
         ...b,
@@ -704,6 +708,7 @@ export default function App() {
       await loadData(session.token, session.userId);
     } catch (e) {
       showToast("Error: " + e.message);
+      await loadData(session.token, session.userId);
     }
   }
 
@@ -724,12 +729,15 @@ export default function App() {
     if (!winnerProf) return showToast("Profile not found");
 
     try {
-      await updateBet(bet.id, {
+      const result = await updateBet(bet.id, {
         status: "settled",
         winner_id: winnerId,
         winner_name: winnerName,
         winner_option: selectedOption || null,
       }, session.token);
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error("Settle was blocked by the database (check Supabase RLS update policy on bets)");
+      }
 
       if (opponentExists) {
         if (!loserProf) return showToast("Opponent profile not found");
@@ -752,7 +760,10 @@ export default function App() {
     const creatorProf = profiles.find(p => p.id === bet.creator_id);
     if (!creatorProf) return;
     try {
-      await updateBet(bet.id, { status: "cancelled" }, session.token);
+      const result = await updateBet(bet.id, { status: "cancelled" }, session.token);
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error("Cancel was blocked by the database (check Supabase RLS update policy on bets)");
+      }
       await updateProfile(bet.creator_id, { balance: creatorProf.balance + bet.stake }, session.token);
       showToast("Bet void. Stake returned.");
       await loadData(session.token, session.userId);

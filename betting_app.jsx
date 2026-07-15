@@ -113,6 +113,28 @@ async function updateBet(betId, updates, token) {
   });
 }
 
+// Bet participants (pool model — many people can back either side)
+async function getAllParticipants(token) {
+  return sbFetch("/rest/v1/bet_participants?select=*", { token });
+}
+
+async function addParticipant(betId, userId, username, choice, stake, token) {
+  return sbFetch("/rest/v1/bet_participants", {
+    method: "POST",
+    token,
+    prefer: "return=representation",
+    body: { bet_id: betId, user_id: userId, username, choice, stake },
+  });
+}
+
+async function deleteParticipant(participantId, token) {
+  return sbFetch(`/rest/v1/bet_participants?id=eq.${participantId}`, {
+    method: "DELETE",
+    token,
+    prefer: "return=representation",
+  });
+}
+
 // ── Face image (embedded, trimmed for brevity — just the face PNG base64) ────
 // (same FACE_IMG as before — only the pixel stripping canvas logic uses it)
 const FACE_IMG = "data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoH";
@@ -359,7 +381,7 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem 1.25rem", backgroundImage: dark ? "radial-gradient(circle at top left, rgba(0,71,255,0.18), transparent 35%), linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "radial-gradient(circle at top left, rgba(0,71,255,0.08), transparent 35%), linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
+    <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem 1.25rem", backgroundImage: dark ? "linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" />
 
       <div style={{ position: "absolute", top: 24, right: 24 }}>
@@ -437,23 +459,52 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
 function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCancel, dark }) {
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
-  const isOpponent = bet.opponent_id === currentUserId;
-  const hasMatch   = !!bet.opponent_id;
-  const isOpen     = bet.status === "open";
-  const canJoin    = isOpen && !isCreator && !hasMatch;
-  const canSettle  = isCreator && hasMatch;
-  const canCancel  = isOpen && isCreator;
-  const pot        = bet.stake * 2;
-  const oppCost    = bet.stake;
+  const participants = bet.participants || [];
   const optionA    = bet.option_a || "Yes";
   const optionB    = bet.option_b || "No";
-  const selectedChoice = bet.opponent_choice === "B" ? "B" : bet.opponent_choice === "A" ? "A" : null;
-  const opponentChoice = selectedChoice === "B" ? optionB : selectedChoice === "A" ? optionA : null;
-  const pillStatus = hasMatch ? "matched" : bet.status;
+  const creatorChoice = bet.creator_choice === "B" ? "B" : "A";
+
+  const sides = [
+    { id: bet.creator_id, name: bet.creator_name, choice: creatorChoice, stake: bet.stake, isCreator: true },
+    ...participants.map(p => ({ id: p.user_id, name: p.username, choice: p.choice, stake: p.stake, isCreator: false })),
+  ];
+  const sideA = sides.filter(p => p.choice === "A");
+  const sideB = sides.filter(p => p.choice === "B");
+  const pot   = sides.reduce((sum, p) => sum + p.stake, 0);
+
+  const myEntry   = sides.find(p => p.id === currentUserId);
+  const hasJoined = !!myEntry;
+  const isOpen    = bet.status === "open";
+  const canJoin   = isOpen && !isCreator && !hasJoined;
+  const canSettle = isCreator && isOpen && participants.length > 0;
+  const canCancel = isOpen && isCreator;
+  const pillStatus = participants.length > 0 && isOpen ? "matched" : bet.status;
 
   const isSecret     = bet.secret;
   const descRevealed = !isSecret || isCreator || bet.status === "settled";
   const justRevealed = isSecret && bet.status === "settled";
+
+  const winners = bet.status === "settled" && bet.winner_option
+    ? sides.filter(p => (p.choice === "B" ? optionB : optionA) === bet.winner_option)
+    : [];
+
+  function AvatarRow({ list }) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {list.map(p => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Avatar name={p.name} size={20} dark={dark} />
+            <span style={{ fontFamily: sans, fontSize: 12, color: t.textMid }}>
+              {p.name}{p.isCreator ? " (creator)" : ""}
+            </span>
+            <span style={{ fontFamily: mono, fontSize: 12, color: t.textDim, display: "inline-flex", alignItems: "center", gap: 2 }}>
+              <Coin size={11} />{p.stake}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div style={{ borderTop: `1px solid ${t.border}`, padding: "16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -476,42 +527,35 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
       </div>
 
       <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Avatar name={bet.creator_name} size={22} dark={dark} />
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textMid }}>{bet.creator_name}</span>
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>puts</span>
-          <span style={{ fontFamily: mono, fontSize: 13, color: ACCENT, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={13} />{bet.stake}</span>
+        <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>
+          pot <span style={{ fontFamily: mono, fontSize: 12, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={12} />{pot}</span>
+        </span>
+        <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>
+          {sides.length} {sides.length === 1 ? "backer" : "backers"}
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div>
+          <div style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", marginBottom: 6 }}>{optionA.toUpperCase()}</div>
+          {sideA.length > 0 ? <AvatarRow list={sideA} /> : <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>No backers yet</span>}
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>creator backs <strong>{bet.creator_choice === "B" ? optionB : optionA}</strong></span>
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>pot <span style={{ fontFamily: mono, fontSize: 12, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={12} />{pot}</span></span>
+        <div>
+          <div style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", marginBottom: 6 }}>{optionB.toUpperCase()}</div>
+          {sideB.length > 0 ? <AvatarRow list={sideB} /> : <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>No backers yet</span>}
         </div>
       </div>
 
-      {bet.opponent_name && (
+      {winners.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <Avatar name={bet.opponent_name} size={22} dark={dark} />
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textMid }}>{bet.opponent_name}</span>
-          <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>counters with</span>
-          <span style={{ fontFamily: mono, fontSize: 13, color: t.textMid, display: "inline-flex", alignItems: "center", gap: 2 }}><Coin size={13} />{oppCost}</span>
-          {opponentChoice && (
-            <span style={{ fontFamily: sans, fontSize: 12, color: t.textDim }}>({opponentChoice})</span>
-          )}
-        </div>
-      )}
-
-      {bet.winner_name && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: mono, fontSize: 11, color: ACCENT, letterSpacing: "0.08em", fontWeight: 700 }}>WINNER</span>
-          <span style={{ fontFamily: sans, fontSize: 13, color: t.text, fontWeight: 600 }}>{bet.winner_name}</span>
-          {bet.winner_option && (
-            <span style={{ fontFamily: mono, fontSize: 11, color: t.textDim }}>({bet.winner_option})</span>
-          )}
+          <span style={{ fontFamily: mono, fontSize: 11, color: ACCENT, letterSpacing: "0.08em", fontWeight: 700 }}>WINNER{winners.length > 1 ? "S" : ""}</span>
+          <span style={{ fontFamily: sans, fontSize: 13, color: t.text, fontWeight: 600 }}>{winners.map(w => w.name).join(", ")}</span>
+          <span style={{ fontFamily: mono, fontSize: 11, color: t.textDim }}>({bet.winner_option})</span>
           <span style={{ fontFamily: mono, fontSize: 13, color: ACCENT, display: "inline-flex", alignItems: "center", gap: 2 }}>+<Coin size={13} />{pot}</span>
         </div>
       )}
 
-      {(canJoin || canSettle || canCancel || hasMatch) && (
+      {(canJoin || canSettle || canCancel || (hasJoined && isOpen)) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
           {canJoin && (<>
             <button onClick={() => onJoin(bet, "A")} style={{
@@ -524,21 +568,21 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
             }}>{optionB}</button>
           </>)}
 
-          {hasMatch && !canJoin && !canSettle && (
+          {hasJoined && isOpen && !isCreator && (
             <>
               <button disabled style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
-                background: selectedChoice === "A" ? ACCENT : t.btnSecBg,
-                color: selectedChoice === "A" ? "#fff" : t.textDim,
-                border: `1px solid ${selectedChoice === "A" ? ACCENT : t.border2}`,
+                background: myEntry.choice === "A" ? ACCENT : t.btnSecBg,
+                color: myEntry.choice === "A" ? "#fff" : t.textDim,
+                border: `1px solid ${myEntry.choice === "A" ? ACCENT : t.border2}`,
                 padding: "7px 14px", borderRadius: 4,
                 cursor: "not-allowed"
               }}>{optionA}</button>
               <button disabled style={{
                 fontFamily: sans, fontSize: 12, fontWeight: 600,
-                background: selectedChoice === "B" ? ACCENT : t.btnSecBg,
-                color: selectedChoice === "B" ? "#fff" : t.textDim,
-                border: `1px solid ${selectedChoice === "B" ? ACCENT : t.border2}`,
+                background: myEntry.choice === "B" ? ACCENT : t.btnSecBg,
+                color: myEntry.choice === "B" ? "#fff" : t.textDim,
+                border: `1px solid ${myEntry.choice === "B" ? ACCENT : t.border2}`,
                 padding: "7px 14px", borderRadius: 4,
                 cursor: "not-allowed"
               }}>{optionB}</button>
@@ -607,11 +651,20 @@ export default function App() {
   const loadData = useCallback(async (token, userId) => {
     setLoading(true);
     try {
-      const [betsData, profilesData] = await Promise.all([
+      const [betsData, profilesData, participantsData] = await Promise.all([
         getBets(token),
         getAllProfiles(token),
+        getAllParticipants(token),
       ]);
-      setBets(betsData || []);
+      const participantsByBet = {};
+      for (const p of (participantsData || [])) {
+        (participantsByBet[p.bet_id] ||= []).push(p);
+      }
+      const enrichedBets = (betsData || []).map(b => ({
+        ...b,
+        participants: participantsByBet[b.id] || [],
+      }));
+      setBets(enrichedBets);
       setProfiles(profilesData || []);
       const me = (profilesData || []).find(p => p.id === userId);
       setMyProfile(me || null);
@@ -682,29 +735,19 @@ export default function App() {
     }
   }
 
-  async function handleJoinBet(bet, opponentChoice) {
+  async function handleJoinBet(bet, choice) {
     const cost = bet.stake;
-    if (bet.opponent_id) return showToast("This bet is already matched");
+    const participants = bet.participants || [];
+    if (bet.creator_id === session.userId) return showToast("You created this bet");
+    if (participants.some(p => p.user_id === session.userId)) return showToast("You already joined this bet");
     if ((myProfile?.balance || 0) < cost) return showToast(`Need SV${cost} to join`);
     try {
-      const result = await updateBet(bet.id, {
-        status: "matched",
-        opponent_id: session.userId,
-        opponent_name: session.username,
-        opponent_choice: opponentChoice,
-      }, session.token);
+      const result = await addParticipant(bet.id, session.userId, session.username, choice, cost, session.token);
       if (!Array.isArray(result) || result.length === 0) {
-        throw new Error("Join was blocked by the database (check Supabase RLS update policy on bets)");
+        throw new Error("Join was blocked by the database (check Supabase RLS insert policy on bet_participants)");
       }
       await updateProfile(session.userId, { balance: myProfile.balance - cost }, session.token);
-      setBets(current => current.map(b => b.id === bet.id ? {
-        ...b,
-        status: "matched",
-        opponent_id: session.userId,
-        opponent_name: session.username,
-        opponent_choice: opponentChoice,
-      } : b));
-      showToast(`Bet matched. SV${cost} locked in.`);
+      showToast(`Bet joined. SV${cost} locked in.`);
       await loadData(session.token, session.userId);
     } catch (e) {
       showToast("Error: " + e.message);
@@ -716,40 +759,52 @@ export default function App() {
     const optionA = bet.option_a || "Yes";
     const optionB = bet.option_b || "No";
     const creatorChoice = bet.creator_choice || "A";
-    const creatorSide = creatorChoice === "B" ? optionB : optionA;
-    const opponentExists = !!bet.opponent_id;
-    const pot = opponentExists ? bet.stake * 2 : bet.stake;
-    const winnerId = opponentExists
-      ? (selectedOption === creatorSide ? bet.creator_id : bet.opponent_id)
-      : bet.creator_id;
-    const loserId = opponentExists ? (winnerId === bet.creator_id ? bet.opponent_id : bet.creator_id) : null;
-    const winnerName = opponentExists ? (winnerId === bet.creator_id ? bet.creator_name : bet.opponent_name) : bet.creator_name;
-    const winnerProf = profiles.find(p => p.id === winnerId);
-    const loserProf = opponentExists ? profiles.find(p => p.id === loserId) : null;
-    if (!winnerProf) return showToast("Profile not found");
+    const participants = bet.participants || [];
+
+    const sides = [
+      { id: bet.creator_id, name: bet.creator_name, choice: creatorChoice, stake: bet.stake },
+      ...participants.map(p => ({ id: p.user_id, name: p.username, choice: p.choice, stake: p.stake })),
+    ];
+    const totalPot = sides.reduce((sum, p) => sum + p.stake, 0);
+    const sideOption = (choice) => (choice === "B" ? optionB : optionA);
+    const winners = sides.filter(p => sideOption(p.choice) === selectedOption);
+    const losers  = sides.filter(p => sideOption(p.choice) !== selectedOption);
+    const winningStake = winners.reduce((sum, p) => sum + p.stake, 0);
 
     try {
       const result = await updateBet(bet.id, {
         status: "settled",
-        winner_id: winnerId,
-        winner_name: winnerName,
+        winner_id: winners[0]?.id || null,
+        winner_name: winners.length ? winners.map(w => w.name).join(", ") : null,
         winner_option: selectedOption || null,
       }, session.token);
       if (!Array.isArray(result) || result.length === 0) {
         throw new Error("Settle was blocked by the database (check Supabase RLS update policy on bets)");
       }
 
-      if (opponentExists) {
-        if (!loserProf) return showToast("Opponent profile not found");
-        await updateProfile(winnerId, { balance: winnerProf.balance + pot, wins: winnerProf.wins + 1 }, session.token);
-        await updateProfile(loserId, { losses: loserProf.losses + 1 }, session.token);
-        showToast(`${winnerName} collects SV${pot}`);
+      if (winners.length === 0) {
+        // Nobody backed the winning side — refund everyone their stake.
+        for (const p of sides) {
+          const prof = profiles.find(pr => pr.id === p.id);
+          if (prof) await updateProfile(p.id, { balance: prof.balance + p.stake }, session.token);
+        }
+        showToast("No one backed the winning side — stakes refunded");
       } else {
-        await updateProfile(winnerId, { balance: winnerProf.balance + bet.stake }, session.token);
-        showToast(`No opponent — stake returned to ${winnerName}`);
+        for (const w of winners) {
+          const prof = profiles.find(pr => pr.id === w.id);
+          if (!prof) continue;
+          const payout = Math.round((w.stake / winningStake) * totalPot);
+          await updateProfile(w.id, { balance: prof.balance + payout, wins: prof.wins + 1 }, session.token);
+        }
+        for (const l of losers) {
+          const prof = profiles.find(pr => pr.id === l.id);
+          if (!prof) continue;
+          await updateProfile(l.id, { losses: prof.losses + 1 }, session.token);
+        }
+        showToast(`${winners.map(w => w.name).join(", ")} collect SV${totalPot}`);
       }
 
-      if (winnerId === session.userId) setWinnerModal(true);
+      if (winners.some(w => w.id === session.userId)) setWinnerModal(true);
       await loadData(session.token, session.userId);
     } catch (e) {
       showToast("Error: " + e.message);
@@ -759,13 +814,18 @@ export default function App() {
   async function handleCancelBet(bet) {
     const creatorProf = profiles.find(p => p.id === bet.creator_id);
     if (!creatorProf) return;
+    const participants = bet.participants || [];
     try {
       const result = await updateBet(bet.id, { status: "cancelled" }, session.token);
       if (!Array.isArray(result) || result.length === 0) {
         throw new Error("Cancel was blocked by the database (check Supabase RLS update policy on bets)");
       }
       await updateProfile(bet.creator_id, { balance: creatorProf.balance + bet.stake }, session.token);
-      showToast("Bet void. Stake returned.");
+      for (const p of participants) {
+        const prof = profiles.find(pr => pr.id === p.user_id);
+        if (prof) await updateProfile(p.user_id, { balance: prof.balance + p.stake }, session.token);
+      }
+      showToast("Bet void. Stakes returned.");
       await loadData(session.token, session.userId);
     } catch (e) {
       showToast("Error: " + e.message);
@@ -783,7 +843,7 @@ export default function App() {
 
   const visibleBets = bets.filter(b => {
     if (filter === "open") return b.status === "open";
-    if (filter === "mine") return b.creator_id === session.userId || b.opponent_id === session.userId;
+    if (filter === "mine") return b.creator_id === session.userId || (b.participants || []).some(p => p.user_id === session.userId);
     return true;
   });
 
@@ -809,7 +869,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, transition: "background 0.2s", backgroundImage: dark ? "radial-gradient(circle at top left, rgba(0,71,255,0.18), transparent 32%), linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "radial-gradient(circle at top left, rgba(0,71,255,0.08), transparent 32%), linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
+    <div style={{ minHeight: "100vh", background: t.bg, transition: "background 0.2s", backgroundImage: dark ? "linear-gradient(135deg, rgba(255,255,255,0.03), transparent 60%)" : "linear-gradient(135deg, rgba(0,71,255,0.03), transparent 60%)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" />
 
       {winnerModal && <WinnerModal onClose={() => setWinnerModal(false)} />}

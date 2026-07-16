@@ -48,6 +48,22 @@ async function signIn(email, password) {
   });
 }
 
+async function refreshAuthToken(refreshToken) {
+  return sbFetch("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    body: { refresh_token: refreshToken },
+  });
+}
+
+function parseJwtExpiryMs(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 async function signOut(token) {
   return sbFetch("/auth/v1/logout", { method: "POST", token });
 }
@@ -362,7 +378,7 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
           const loginRes = await signIn(email, password);
           const profile = await ensureProfile(res.user.id, username.trim(), loginRes.access_token);
           const chosenUsername = profile?.username || username.trim();
-          onAuth({ token: loginRes.access_token, userId: res.user.id, username: chosenUsername });
+          onAuth({ token: loginRes.access_token, refreshToken: loginRes.refresh_token, userId: res.user.id, username: chosenUsername });
         } else {
           setError("Signup succeeded — check your email to confirm, then log in.");
           setMode("login");
@@ -371,7 +387,7 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
         const res = await signIn(email, password);
         const profile = await ensureProfile(res.user.id, res.user.user_metadata?.username || email.split("@")[0], res.access_token);
         const chosenUsername = profile?.username || res.user.user_metadata?.username || email.split("@")[0];
-        onAuth({ token: res.access_token, userId: res.user.id, username: chosenUsername });
+        onAuth({ token: res.access_token, refreshToken: res.refresh_token, userId: res.user.id, username: chosenUsername });
       }
     } catch (e) {
       setError(e.message);
@@ -618,7 +634,8 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
 
 export default function App() {
   // Auth state
-  const [session, setSession] = useState(null); // { token, userId, username }
+  const [session, setSession] = useState(null); // { token, refreshToken, userId, username }
+  const sessionRef = useRef(null);
   const [dark, setDark]       = useState(true);
 
   // App state
@@ -647,14 +664,45 @@ export default function App() {
     localStorage.setItem("stikky-session", JSON.stringify(sess));
   }
 
+  function applySession(sess) {
+    sessionRef.current = sess;
+    setSession(sess);
+    persistSession(sess);
+  }
+
+  // Ensures we always have a non-expired access token, refreshing it via the
+  // refresh token if it's expired or about to expire (fixes the app going
+  // blank/empty after being left inactive for a long time).
+  const ensureFreshToken = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current) throw new Error("Not signed in");
+    const expMs = parseJwtExpiryMs(current.token);
+    const isExpiring = !expMs || expMs - Date.now() < 60000;
+    if (!isExpiring) return current;
+    if (!current.refreshToken) {
+      applySession(null);
+      throw new Error("Session expired. Please sign in again.");
+    }
+    try {
+      const res = await refreshAuthToken(current.refreshToken);
+      const updated = { ...current, token: res.access_token, refreshToken: res.refresh_token || current.refreshToken };
+      applySession(updated);
+      return updated;
+    } catch (e) {
+      applySession(null);
+      throw new Error("Session expired. Please sign in again.");
+    }
+  }, []);
+
   // Load data after auth
-  const loadData = useCallback(async (token, userId) => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const sess = await ensureFreshToken();
       const [betsData, profilesData, participantsData] = await Promise.all([
-        getBets(token),
-        getAllProfiles(token),
-        getAllParticipants(token),
+        getBets(sess.token),
+        getAllProfiles(sess.token),
+        getAllParticipants(sess.token),
       ]);
       const participantsByBet = {};
       for (const p of (participantsData || [])) {
@@ -666,13 +714,13 @@ export default function App() {
       }));
       setBets(enrichedBets);
       setProfiles(profilesData || []);
-      const me = (profilesData || []).find(p => p.id === userId);
+      const me = (profilesData || []).find(p => p.id === sess.userId);
       setMyProfile(me || null);
     } catch (e) {
       showToast("Failed to load data: " + e.message);
     }
     setLoading(false);
-  }, []);
+  }, [ensureFreshToken]);
 
   useEffect(() => {
     try {
@@ -680,8 +728,9 @@ export default function App() {
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (saved?.token && saved?.userId && saved?.username) {
+        sessionRef.current = saved;
         setSession(saved);
-        loadData(saved.token, saved.userId);
+        loadData();
       } else {
         persistSession(null);
       }
@@ -691,15 +740,14 @@ export default function App() {
   }, [loadData]);
 
   function handleAuth(sess) {
-    setSession(sess);
-    persistSession(sess);
-    loadData(sess.token, sess.userId);
+    applySession(sess);
+    loadData();
   }
 
   async function handleSignOut() {
-    if (session) await signOut(session.token).catch(() => {});
-    persistSession(null);
-    setSession(null);
+    const sess = sessionRef.current;
+    if (sess) await signOut(sess.token).catch(() => {});
+    applySession(null);
     setBets([]);
     setProfiles([]);
     setMyProfile(null);
@@ -712,9 +760,10 @@ export default function App() {
     if ((myProfile?.balance || 0) < stake)  return showToast("Not enough SV coins");
 
     try {
+      const sess = await ensureFreshToken();
       const newBet = {
-        creator_id: session.userId,
-        creator_name: session.username,
+        creator_id: sess.userId,
+        creator_name: sess.username,
         description: form.description.trim(),
         stake,
         odds: 1,
@@ -725,12 +774,12 @@ export default function App() {
         creator_choice: form.creatorChoice,
         invited_ids: form.secret ? form.inviteIds : [],
       };
-      await createBet(newBet, session.token);
-      await updateProfile(session.userId, { balance: myProfile.balance - stake }, session.token);
+      await createBet(newBet, sess.token);
+      await updateProfile(sess.userId, { balance: myProfile.balance - stake }, sess.token);
       setForm({ description: "", stake: 100, secret: false, optionA: "Yes", optionB: "No", creatorChoice: "A", inviteIds: [] });
       setView("bets");
       showToast(`Bet live — staked SV${stake}`);
-      await loadData(session.token, session.userId);
+      await loadData();
     } catch (e) {
       showToast("Error: " + e.message);
     }
@@ -743,16 +792,17 @@ export default function App() {
     if (participants.some(p => p.user_id === session.userId)) return showToast("You already joined this bet");
     if ((myProfile?.balance || 0) < cost) return showToast(`Need SV${cost} to join`);
     try {
-      const result = await addParticipant(bet.id, session.userId, session.username, choice, cost, session.token);
+      const sess = await ensureFreshToken();
+      const result = await addParticipant(bet.id, sess.userId, sess.username, choice, cost, sess.token);
       if (!Array.isArray(result) || result.length === 0) {
         throw new Error("Join was blocked by the database (check Supabase RLS insert policy on bet_participants)");
       }
-      await updateProfile(session.userId, { balance: myProfile.balance - cost }, session.token);
+      await updateProfile(sess.userId, { balance: myProfile.balance - cost }, sess.token);
       showToast(`Bet joined. SV${cost} locked in.`);
-      await loadData(session.token, session.userId);
+      await loadData();
     } catch (e) {
       showToast("Error: " + e.message);
-      await loadData(session.token, session.userId);
+      await loadData();
     }
   }
 
@@ -773,12 +823,13 @@ export default function App() {
     const winningStake = winners.reduce((sum, p) => sum + p.stake, 0);
 
     try {
+      const sess = await ensureFreshToken();
       const result = await updateBet(bet.id, {
         status: "settled",
         winner_id: winners[0]?.id || null,
         winner_name: winners.length ? winners.map(w => w.name).join(", ") : null,
         winner_option: selectedOption || null,
-      }, session.token);
+      }, sess.token);
       if (!Array.isArray(result) || result.length === 0) {
         throw new Error("Settle was blocked by the database (check Supabase RLS update policy on bets)");
       }
@@ -787,7 +838,7 @@ export default function App() {
         // Nobody backed the winning side — refund everyone their stake.
         for (const p of sides) {
           const prof = profiles.find(pr => pr.id === p.id);
-          if (prof) await updateProfile(p.id, { balance: prof.balance + p.stake }, session.token);
+          if (prof) await updateProfile(p.id, { balance: prof.balance + p.stake }, sess.token);
         }
         showToast("No one backed the winning side — stakes refunded");
       } else {
@@ -795,18 +846,18 @@ export default function App() {
           const prof = profiles.find(pr => pr.id === w.id);
           if (!prof) continue;
           const payout = Math.round((w.stake / winningStake) * totalPot);
-          await updateProfile(w.id, { balance: prof.balance + payout, wins: prof.wins + 1 }, session.token);
+          await updateProfile(w.id, { balance: prof.balance + payout, wins: prof.wins + 1 }, sess.token);
         }
         for (const l of losers) {
           const prof = profiles.find(pr => pr.id === l.id);
           if (!prof) continue;
-          await updateProfile(l.id, { losses: prof.losses + 1 }, session.token);
+          await updateProfile(l.id, { losses: prof.losses + 1 }, sess.token);
         }
         showToast(`${winners.map(w => w.name).join(", ")} collect SV${totalPot}`);
       }
 
-      if (winners.some(w => w.id === session.userId)) setWinnerModal(true);
-      await loadData(session.token, session.userId);
+      if (winners.some(w => w.id === sess.userId)) setWinnerModal(true);
+      await loadData();
     } catch (e) {
       showToast("Error: " + e.message);
     }
@@ -817,17 +868,18 @@ export default function App() {
     if (!creatorProf) return;
     const participants = bet.participants || [];
     try {
-      const result = await updateBet(bet.id, { status: "cancelled" }, session.token);
+      const sess = await ensureFreshToken();
+      const result = await updateBet(bet.id, { status: "cancelled" }, sess.token);
       if (!Array.isArray(result) || result.length === 0) {
         throw new Error("Cancel was blocked by the database (check Supabase RLS update policy on bets)");
       }
-      await updateProfile(bet.creator_id, { balance: creatorProf.balance + bet.stake }, session.token);
+      await updateProfile(bet.creator_id, { balance: creatorProf.balance + bet.stake }, sess.token);
       for (const p of participants) {
         const prof = profiles.find(pr => pr.id === p.user_id);
-        if (prof) await updateProfile(p.user_id, { balance: prof.balance + p.stake }, session.token);
+        if (prof) await updateProfile(p.user_id, { balance: prof.balance + p.stake }, sess.token);
       }
       showToast("Bet void. Stakes returned.");
-      await loadData(session.token, session.userId);
+      await loadData();
     } catch (e) {
       showToast("Error: " + e.message);
     }
@@ -929,7 +981,7 @@ export default function App() {
                   {f === "all" ? "ALL" : f === "open" ? "OPEN" : "MINE"}
                 </button>
               ))}
-              <button onClick={() => loadData(session.token, session.userId)} style={{
+              <button onClick={() => loadData()} style={{
                 marginLeft: "auto", fontFamily: mono, fontSize: 10, letterSpacing: "0.08em",
                 color: t.textDim, background: "transparent", border: `1px solid ${t.border}`,
                 borderRadius: 3, padding: "4px 10px", cursor: "pointer"

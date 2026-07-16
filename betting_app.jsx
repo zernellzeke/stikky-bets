@@ -716,6 +716,11 @@ export default function App() {
       setProfiles(profilesData || []);
       const me = (profilesData || []).find(p => p.id === sess.userId);
       setMyProfile(me || null);
+      // Keep the cached session username in sync with the real profile —
+      // fixes stale sessions that were saved with a wrong/fallback username.
+      if (me?.username && me.username !== sess.username) {
+        applySession({ ...sess, username: me.username });
+      }
     } catch (e) {
       showToast("Failed to load data: " + e.message);
     }

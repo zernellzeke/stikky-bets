@@ -847,11 +847,24 @@ export default function App() {
         }
         showToast("No one backed the winning side — stakes refunded");
       } else {
-        for (const w of winners) {
-          const prof = profiles.find(pr => pr.id === w.id);
+        // Split the pot proportionally using the "largest remainder" method
+        // so payouts are whole numbers that always sum to exactly totalPot
+        // (plain independent rounding can silently lose/gain coins).
+        const shares = winners.map(w => {
+          const exact = (w.stake / winningStake) * totalPot;
+          return { w, floor: Math.floor(exact), remainder: exact - Math.floor(exact) };
+        });
+        let leftover = totalPot - shares.reduce((sum, s) => sum + s.floor, 0);
+        shares.sort((a, b) => b.remainder - a.remainder);
+        for (const s of shares) {
+          if (leftover > 0) { s.payout = s.floor + 1; leftover--; }
+          else { s.payout = s.floor; }
+        }
+
+        for (const s of shares) {
+          const prof = profiles.find(pr => pr.id === s.w.id);
           if (!prof) continue;
-          const payout = Math.round((w.stake / winningStake) * totalPot);
-          await updateProfile(w.id, { balance: prof.balance + payout, wins: prof.wins + 1 }, sess.token);
+          await updateProfile(s.w.id, { balance: prof.balance + s.payout, wins: prof.wins + 1 }, sess.token);
         }
         for (const l of losers) {
           const prof = profiles.find(pr => pr.id === l.id);

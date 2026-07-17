@@ -1116,19 +1116,6 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 4, padding: "12px 14px", marginBottom: "1.5rem", display: "flex", gap: 24, flexWrap: "wrap" }}>
-              {[
-                { label: "YOU RISK",  val: parseInt(form.stake) || 0,  color: ACCENT },
-                { label: "THEY RISK", val: parseInt(form.stake) || 0,  color: t.textMid },
-                { label: "TOTAL POT", val: (parseInt(form.stake)||0) * 2, color: t.text },
-              ].map(({ label, val, color }) => (
-                <div key={label}>
-                  <div style={{ fontFamily: mono, fontSize: 10, color: t.textDim, letterSpacing: "0.1em", marginBottom: 4 }}>{label}</div>
-                  <span style={{ fontFamily: mono, fontSize: 18, color, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}><Coin size={18} /><span style={{ color }}>{val}</span></span>
-                </div>
-              ))}
-            </div>
-
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={handleCreateBet} style={{
                 fontFamily: sans, fontSize: 13, fontWeight: 700, letterSpacing: "-0.01em",

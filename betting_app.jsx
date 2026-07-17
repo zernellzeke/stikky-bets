@@ -471,7 +471,7 @@ function AuthScreen({ dark, onToggleDark, onAuth }) {
 
 // ── Bet card ───────────────────────────────────────────────────────────────────
 
-function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCancel, dark }) {
+function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCancel, onUndoSettle, dark }) {
   const t = theme(dark);
   const isCreator = bet.creator_id === currentUserId;
   const participants = bet.participants || [];
@@ -493,6 +493,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
   const canJoin   = isOpen && !isCreator && !hasJoined;
   const canSettle = isCreator && isOpen && participants.length > 0;
   const canCancel = isOpen && isCreator;
+  const canUndo   = isCreator && bet.status === "settled" && !!bet.settlement_snapshot;
   const pillStatus = participants.length > 0 && isOpen ? "matched" : bet.status;
 
   const isSecret     = bet.secret;
@@ -571,7 +572,7 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
         </div>
       )}
 
-      {(canJoin || canSettle || canCancel || (hasJoined && isOpen)) && (
+      {(canJoin || canSettle || canCancel || canUndo || (hasJoined && isOpen)) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
           {canJoin && (<>
             <button onClick={() => onJoin(bet, "A")} style={{
@@ -623,6 +624,13 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
               fontFamily: sans, fontSize: 12, color: t.textDim, background: "transparent",
               border: `1px solid ${t.border}`, padding: "7px 14px", borderRadius: 4, cursor: "pointer"
             }}>Cancel</button>
+          )}
+
+          {canUndo && (
+            <button onClick={() => onUndoSettle(bet)} style={{
+              fontFamily: sans, fontSize: 12, color: t.loss, background: "transparent",
+              border: `1px solid ${t.loss}`, padding: "7px 14px", borderRadius: 4, cursor: "pointer"
+            }}>↺ Undo settle</button>
           )}
         </div>
       )}
@@ -829,23 +837,19 @@ export default function App() {
 
     try {
       const sess = await ensureFreshToken();
-      const result = await updateBet(bet.id, {
-        status: "settled",
-        winner_id: winners[0]?.id || null,
-        winner_name: winners.length ? winners.map(w => w.name).join(", ") : null,
-        winner_option: selectedOption || null,
-      }, sess.token);
-      if (!Array.isArray(result) || result.length === 0) {
-        throw new Error("Settle was blocked by the database (check Supabase RLS update policy on bets)");
-      }
+      // Snapshot of every balance/wins/losses delta applied, so this settlement
+      // can be precisely reversed later via "Undo".
+      const deltas = [];
 
       if (winners.length === 0) {
         // Nobody backed the winning side — refund everyone their stake.
         for (const p of sides) {
           const prof = profiles.find(pr => pr.id === p.id);
-          if (prof) await updateProfile(p.id, { balance: prof.balance + p.stake }, sess.token);
+          if (prof) {
+            await updateProfile(p.id, { balance: prof.balance + p.stake }, sess.token);
+            deltas.push({ id: p.id, balance: p.stake, wins: 0, losses: 0 });
+          }
         }
-        showToast("No one backed the winning side — stakes refunded");
       } else {
         // Split the pot proportionally using the "largest remainder" method
         // so payouts are whole numbers that always sum to exactly totalPot
@@ -865,16 +869,65 @@ export default function App() {
           const prof = profiles.find(pr => pr.id === s.w.id);
           if (!prof) continue;
           await updateProfile(s.w.id, { balance: prof.balance + s.payout, wins: prof.wins + 1 }, sess.token);
+          deltas.push({ id: s.w.id, balance: s.payout, wins: 1, losses: 0 });
         }
         for (const l of losers) {
           const prof = profiles.find(pr => pr.id === l.id);
           if (!prof) continue;
           await updateProfile(l.id, { losses: prof.losses + 1 }, sess.token);
+          deltas.push({ id: l.id, balance: 0, wins: 0, losses: 1 });
         }
-        showToast(`${winners.map(w => w.name).join(", ")} collect SV${totalPot}`);
       }
 
+      const result = await updateBet(bet.id, {
+        status: "settled",
+        winner_id: winners[0]?.id || null,
+        winner_name: winners.length ? winners.map(w => w.name).join(", ") : null,
+        winner_option: selectedOption || null,
+        settlement_snapshot: { deltas },
+      }, sess.token);
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error("Settle was blocked by the database (check Supabase RLS update policy on bets)");
+      }
+
+      showToast(winners.length === 0
+        ? "No one backed the winning side — stakes refunded"
+        : `${winners.map(w => w.name).join(", ")} collect SV${totalPot}`);
+
       if (winners.some(w => w.id === sess.userId)) setWinnerModal(true);
+      await loadData();
+    } catch (e) {
+      showToast("Error: " + e.message);
+    }
+  }
+
+  async function handleUndoSettle(bet) {
+    const deltas = bet.settlement_snapshot?.deltas;
+    if (!Array.isArray(deltas) || deltas.length === 0) {
+      return showToast("Nothing to undo for this bet");
+    }
+    try {
+      const sess = await ensureFreshToken();
+      for (const d of deltas) {
+        const prof = profiles.find(pr => pr.id === d.id);
+        if (!prof) continue;
+        await updateProfile(d.id, {
+          balance: prof.balance - (d.balance || 0),
+          wins: prof.wins - (d.wins || 0),
+          losses: prof.losses - (d.losses || 0),
+        }, sess.token);
+      }
+      const result = await updateBet(bet.id, {
+        status: "open",
+        winner_id: null,
+        winner_name: null,
+        winner_option: null,
+        settlement_snapshot: null,
+      }, sess.token);
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error("Undo was blocked by the database (check Supabase RLS update policy on bets)");
+      }
+      showToast("Settlement undone. Bet is open again.");
       await loadData();
     } catch (e) {
       showToast("Error: " + e.message);
@@ -1018,6 +1071,7 @@ export default function App() {
                       onJoin={handleJoinBet}
                       onSettle={handleSettleBet}
                       onCancel={handleCancelBet}
+                      onUndoSettle={handleUndoSettle}
                     />
                   ))
             }

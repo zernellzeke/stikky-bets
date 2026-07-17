@@ -607,16 +607,19 @@ function BetCard({ bet, currentUserId, currentUsername, onJoin, onSettle, onCanc
           )}
 
           {canSettle && (<>
+            <div style={{ flexBasis: "100%", fontFamily: mono, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", color: "#F5A623" }}>
+              ⚠ SETTLE THIS BET — WHO WON?
+            </div>
             <button onClick={() => onSettle(bet, optionA)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
-              background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
+              background: "transparent", color: "#F5A623", border: `1px solid #F5A623`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{optionA}</button>
+            }}>✓ {optionA} won</button>
             <button onClick={() => onSettle(bet, optionB)} style={{
               fontFamily: sans, fontSize: 12, fontWeight: 600,
-              background: t.btnSecBg, color: t.btnSecTxt, border: `1px solid ${t.border2}`,
+              background: "transparent", color: "#F5A623", border: `1px solid #F5A623`,
               padding: "7px 14px", borderRadius: 4, cursor: "pointer"
-            }}>{optionB}</button>
+            }}>✓ {optionB} won</button>
           </>)}
 
           {canCancel && (
